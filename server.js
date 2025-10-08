@@ -507,8 +507,8 @@ async function main() {
             }
         });
 
-        const host = process.env.HOST || '0.0.0.0';
-        const port = Number(process.env.PORT) || 3000;
+        const host = '0.0.0.0';
+        const port = 3000;
 
         const httpServer = app.listen(port, host, () => {
             console.error(`Ticket Generator MCP server running on http://${host}:${port}`);
