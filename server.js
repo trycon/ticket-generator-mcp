@@ -17,7 +17,7 @@ import {
 import axios from 'axios';
 
 
-const TG_API_BASE_URL = 'https://apis.ticket-generator.com/client';
+const TG_API_BASE_URL = 'https://apis.ticket-generator.com/client/v1';
 
 // Store API keys by session ID for HTTP transport
 const apiKeysBySession = {};
@@ -57,6 +57,11 @@ async function makeTGRequest(endpoint, method = 'GET', data = null, apiKey = nul
 
     try {
 
+        // console.log('Making API request to:', `${TG_API_BASE_URL}${endpoint}`);
+        // console.log('API Key:', apiKey);
+        // console.log('Data:', data);
+        // console.log('Method:', method);
+
         const config = {
             method,
             url: `${TG_API_BASE_URL}${endpoint}`,
@@ -71,6 +76,8 @@ async function makeTGRequest(endpoint, method = 'GET', data = null, apiKey = nul
         }
 
         const response = await axios(config);
+
+        // console.log('Response:', response.data);
 
         return {
             success: true,
