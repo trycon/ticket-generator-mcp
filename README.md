@@ -14,101 +14,124 @@ This MCP server acts as a bridge between AI agents and the Ticket Generator APIs
 
 - Node.js 18.0.0 or higher
 - A Ticket Generator API key (obtain from [https://apis.ticket-generator.com/client/api-docs/](https://apis.ticket-generator.com/client/api-docs/))
+- (For local development) [ngrok](https://ngrok.com/) for exposing local server
 
-## Installation
+## Quick Start
 
-1. Clone or download this repository
-2. Install dependencies:
+1. **Install dependencies:**
    ```bash
    npm install
    ```
 
-3. Set up environment variables:
+2. **Start the server (HTTP mode):**
    ```bash
-   cp .env.example .env
+   npm run dev:http
    ```
-   
-   Edit `.env` and add your Ticket Generator API key:
+
+3. **Expose locally with ngrok:**
+   ```bash
+   ngrok http 3000
    ```
-   TG_API_KEY=your_actual_api_key_here
+
+4. **Configure your MCP client** with the ngrok URL and your API key:
+   ```json
+   {
+     "mcpServers": {
+       "ticket-generator": {
+         "url": "https://your-ngrok-url.ngrok-free.app/mcp",
+         "headers": {
+           "Authorization": "your_ticket_generator_api_key"
+         }
+       }
+     }
+   }
    ```
+
+## API Key Security
+
+**Important:** The API key is passed securely via the `Authorization` header from your MCP client configuration. It is:
+- **Never stored** in environment variables or `.env` files
+- **Session-specific** - each client session has its own API key
+- **Transmitted securely** over HTTPS (production) or ngrok tunnel (development)
 
 ## Usage
 
-### Running the MCP Server
+This MCP server runs in **HTTP transport mode** for both development and production. The API key is securely passed from your MCP client configuration.
 
-Start the server (stdio mode):
-```bash
-npm start
-```
+### Local Development with ngrok
 
-For development with auto-restart:
-```bash
-npm run dev
-```
+1. Start the MCP server in HTTP mode:
+   ```bash
+   npm run dev:http
+   ```
+   This will start the server on `http://localhost:3000`
 
-### HTTP mode (for ngrok and remote access)
+2. In a separate terminal, expose your local server using ngrok:
+   ```bash
+   ngrok http 3000
+   ```
+   
+3. Copy the ngrok forwarding URL (e.g., `https://abc123.ngrok-free.app`)
 
-You can expose the MCP server over HTTP using the Streamable HTTP transport for remote AI agents.
+4. Configure your MCP client (Claude Desktop, Cursor, etc.) with the ngrok URL and your API key:
+   ```json
+   {
+     "mcpServers": {
+       "ticket-generator": {
+         "url": "https://abc123.ngrok-free.app/mcp",
+         "headers": {
+           "Authorization": "your_ticket_generator_api_key"
+         }
+       }
+     }
+   }
+   ```
 
-1. Set transport and port (default port is 3000):
-```bash
-MCP_TRANSPORT=http PORT=3000 npm start
-```
+### Production Deployment
 
-2. Endpoints:
-- `GET /health` — health check
-- `POST /mcp` — MCP Streamable HTTP endpoint (handles initialization and tool calls)
+For production deployment, follow these steps:
+
+1. Deploy the server to your hosting platform (AWS, DigitalOcean, etc.)
+
+2. Set the required environment variables:
+   ```bash
+   export MCP_TRANSPORT=http
+   export PORT=3000
+   export HOST=0.0.0.0
+   ```
+
+3. Optional environment variables for production:
+   - `CORS_ORIGINS` — comma-separated allowed origins (e.g., `https://yourapp.com`)
+   - `RATE_WINDOW_MS` — rate-limit window in ms (default: 60000)
+   - `RATE_MAX` — max requests per IP per window (default: 60)
+   - `JSON_LIMIT` — JSON body limit (default: 200kb)
+   - `LOG_FORMAT` — morgan log format (default: combined)
+
+4. Start the server:
+   ```bash
+   npm start
+   ```
+
+5. Configure your MCP client with your production URL:
+   ```json
+   {
+     "mcpServers": {
+       "ticket-generator": {
+         "url": "https://your-production-domain.com/mcp",
+         "headers": {
+           "Authorization": "your_ticket_generator_api_key"
+         }
+       }
+     }
+   }
+   ```
+
+### Server Endpoints
+
+- `GET /health` — Health check endpoint
+- `POST /mcp` — MCP initialization and tool call handling
 - `GET /mcp` — Server-to-client notifications via streaming
 - `DELETE /mcp` — Session termination
-
-3. Using ngrok:
-```bash
-ngrok http http://localhost:3000
-```
-
-4. Configure your AI assistant with the ngrok URL:
-```json
-{
-  "mcpServers": {
-    "ticket-generator": {
-      "url": "https://your-ngrok-url.ngrok-free.app/mcp"
-    }
-  }
-}
-```
-
-### Production configuration
-
-Set these environment variables when running in HTTP mode:
-
-- `CORS_ORIGINS` — comma-separated allowed origins (omit to disable CORS)
-- `RATE_WINDOW_MS` — rate-limit window in ms (default: 60000)
-- `RATE_MAX` — max requests per IP per window (default: 60)
-- `JSON_LIMIT` — JSON body limit (default: 200kb)
-- `HOST` — bind host (default: 0.0.0.0)
-- `PORT` — port (default: 3000)
-- `LOG_FORMAT` — morgan format (default: combined)
-
-Example:
-```bash
-export MCP_TRANSPORT=http
-export CORS_ORIGINS=https://yourapp.com,https://admin.yourapp.com
-export RATE_WINDOW_MS=60000
-export RATE_MAX=60
-export JSON_LIMIT=200kb
-export PORT=3000
-npm start
-```
-
-With ngrok:
-```bash
-ngrok http http://localhost:3000
-```
-
-The MCP endpoint will be available at: `https://your-ngrok-url.ngrok-free.app/mcp`
-
-Configure your AI assistant (Claude Desktop, Cursor, etc.) to use this URL as shown in the HTTP mode section above.
 
 ### Available Tools
 
@@ -149,31 +172,61 @@ Gets event details and information from the Ticket Generator API.
 - `include_tickets` (optional): Whether to include ticket information in the response - default: false
 - `include_attendees` (optional): Whether to include attendee information in the response - default: false
 
-## Integration with AI Agents
+## Integration with MCP Clients
 
 ### Claude Desktop
 
-Add this server to your Claude Desktop configuration:
+Add this server to your Claude Desktop configuration file (`claude_desktop_config.json`):
 
-1. Open Claude Desktop settings
-2. Add a new MCP server with the following configuration:
-   ```json
-   {
-     "mcpServers": {
-       "ticket-generator": {
-         "command": "node",
-         "args": ["/path/to/your/ticket-generator-mcp/server.js"],
-         "env": {
-           "TG_API_KEY": "your_api_key_here"
-         }
-       }
-     }
-   }
-   ```
+```json
+{
+  "mcpServers": {
+    "ticket-generator": {
+      "url": "https://your-server-url.com/mcp",
+      "headers": {
+        "Authorization": "your_ticket_generator_api_key"
+      }
+    }
+  }
+}
+```
+
+For local development with ngrok:
+```json
+{
+  "mcpServers": {
+    "ticket-generator": {
+      "url": "https://abc123.ngrok-free.app/mcp",
+      "headers": {
+        "Authorization": "your_ticket_generator_api_key"
+      }
+    }
+  }
+}
+```
 
 ### Cursor IDE
 
-Configure Cursor to use this MCP server by adding it to your MCP configuration file.
+Add the server to your Cursor MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "ticket-generator": {
+      "url": "https://your-server-url.com/mcp",
+      "headers": {
+        "Authorization": "your_ticket_generator_api_key"
+      }
+    }
+  }
+}
+```
+
+### Other MCP Clients
+
+Any MCP-compatible client can connect to this server using HTTP transport. Configure it with:
+- **URL**: Your server endpoint (e.g., `https://your-domain.com/mcp`)
+- **Authorization Header**: Your Ticket Generator API key
 
 ## API Endpoints
 
@@ -201,19 +254,41 @@ The MCP server includes comprehensive error handling:
 
 ```
 ticket-generator-mcp/
-├── server.js          # Main MCP server implementation
-├── package.json       # Node.js dependencies and scripts
-├── .env.example       # Environment variables template
-└── README.md          # This file
+├── server.js              # Main MCP server implementation
+├── package.json           # Node.js dependencies and scripts
+├── ecosystem.config.cjs   # PM2 configuration for production
+├── deploy.sh             # Deployment script
+├── nginx.conf            # Nginx reverse proxy configuration
+├── Dockerfile            # Docker container configuration
+└── README.md             # This file
 ```
 
 ### Adding New Tools
 
 To add new tools to the MCP server:
 
-1. Add the tool definition to the `ListToolsRequestSchema` handler
-2. Add the corresponding case in the `CallToolRequestSchema` handler
+1. Add the tool definition to the `getToolDefinitions()` function
+2. Add the corresponding case in the `handleToolCall()` function
 3. Implement the API call using the `makeTGRequest` helper function
+
+### Local Development Setup
+
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+2. Start the server in development mode:
+   ```bash
+   npm run dev:http
+   ```
+
+3. In a separate terminal, start ngrok:
+   ```bash
+   ngrok http 3000
+   ```
+
+4. Use the ngrok URL to configure your MCP client with your API key in the Authorization header
 
 ## License
 
