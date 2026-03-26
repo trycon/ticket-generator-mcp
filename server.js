@@ -260,7 +260,7 @@ async function handleToolCall(name, args, apiKey) {
                          content: [
                              {
                                  type: 'text',
-                                 text: `Ticket generated successfully!\n\nTicket Category Name: ${result.data.ticketCategoryName}\nTicket ID: ${result.data.ticketId}\Ticket Data (Base64): ${result.data.base64EncodedUrl}`,
+                                 text: `Ticket generated successfully!\n\nTicket Category Name: ${result.data.ticketCategoryName}\nTicket ID: ${result.data.ticketId}\nTicket Data (Base64): ${result.data.base64EncodedUrl}`,
                              },
                          ],
                      };

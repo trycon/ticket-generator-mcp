@@ -5,10 +5,10 @@ A Model Context Protocol (MCP) server that provides AI agents with access to the
 ## Overview
 
 This MCP server acts as a bridge between AI agents and the Ticket Generator APIs, allowing AI assistants to:
-- Get ticket data and information
-- Generate ticket URLs for sharing
-- Send tickets via email or other delivery methods
-- Retrieve event details and information
+- Generate ticket IDs with QR code images (base64 PNG)
+- Get hosted ticket URLs with optional variable field overrides
+- Send tickets via email, SMS, or WhatsApp
+- Retrieve event details for all active events on your account
 
 ## Prerequisites
 
@@ -49,14 +49,15 @@ This MCP server acts as a bridge between AI agents and the Ticket Generator APIs
 
 ## API Key Security
 
-**Important:** The API key is passed securely via the `Authorization` header from your MCP client configuration. It is:
-- **Never stored** in environment variables or `.env` files
-- **Session-specific** - each client session has its own API key
+**Important:** In HTTP transport mode, the API key is passed securely via the `Authorization` header from your MCP client configuration. It is:
+- **Session-specific** — each client session has its own API key stored in memory
 - **Transmitted securely** over HTTPS (production) or ngrok tunnel (development)
+
+In stdio transport mode, the API key is read from the `TG_API_KEY` environment variable.
 
 ## Usage
 
-This MCP server runs in **HTTP transport mode** for both development and production. The API key is securely passed from your MCP client configuration.
+This MCP server supports two transport modes: **HTTP** (for development and production deployments) and **stdio** (for local CLI usage). In HTTP mode the API key is securely passed from your MCP client configuration via the `Authorization` header. In stdio mode the key is read from the `TG_API_KEY` environment variable.
 
 ### Local Development with ngrok
 
@@ -93,12 +94,11 @@ For production deployment, follow these steps:
 
 1. Deploy the server to your hosting platform (AWS, DigitalOcean, etc.)
 
-2. Set the required environment variables:
+2. Set the required environment variable:
    ```bash
    export MCP_TRANSPORT=http
-   export PORT=3000
-   export HOST=0.0.0.0
    ```
+   > **Note:** The server listens on `0.0.0.0:3000` (hardcoded in `server.js`).
 
 3. Optional environment variables for production:
    - `CORS_ORIGINS` — comma-separated allowed origins (e.g., `https://yourapp.com`)
@@ -138,39 +138,45 @@ For production deployment, follow these steps:
 The MCP server provides the following tools for AI agents:
 
 #### 1. `get_ticket_data`
-Gets ticket data and information from the Ticket Generator API.
+Generates a ticket ID and its QR Code image (base64 PNG) for a given event. Optionally pass a ticket category and image width.
 
 **Parameters:**
-- `ticket_id` (required): The unique ID of the ticket to retrieve data for
-- `event_id` (optional): The event ID associated with the ticket
-- `user_id` (optional): The user ID who owns the ticket
+- `eventId` (required): The Ticket Generator Event ID for which the ticket should be created
+- `width` (required): QR image width/height in pixels (square). Allowed range: 300–1500. Default: 300
+- `ticketCategoryId` (optional): Ticket Category ID. If the event has only one category, this can be omitted
 
 #### 2. `get_ticket_url`
-Generates a ticket URL for sharing or accessing the ticket.
+Returns a URL to the rendered QR Code ticket for the specified event (and optional category). You can optionally override up to 5 variable fields on the ticket design.
 
 **Parameters:**
-- `ticket_id` (required): The unique ID of the ticket to get URL for
-- `event_id` (optional): The event ID associated with the ticket
-- `user_id` (optional): The user ID who owns the ticket
-- `format` (optional): URL format preference (web, mobile, pdf) - default: web
+- `eventId` (required): Ticket Generator Event ID
+- `ticketCategoryId` (optional): Ticket Category ID. Omit if the event has a single category
+- `variables` (optional): Array of up to 5 variable field overrides, each with:
+  - `value` (required): Value for this variable (e.g., `"Mark"`, `"A2"`)
+  - `header` (optional): Header/label for this variable (e.g., `"Name"`, `"Seat"`). Leave empty to use the default label defined in the design
 
 #### 3. `send_ticket`
-Sends a ticket via email or other delivery method.
+Sends a generated ticket to a recipient via Email, SMS, or WhatsApp. You can include subject, body, and sender details, along with up to 5 custom variable fields.
 
 **Parameters:**
-- `ticket_id` (required): The unique ID of the ticket to send
-- `recipient_email` (required): Email address to send the ticket to
-- `recipient_name` (optional): Name of the recipient
-- `delivery_method` (optional): Delivery method (email, sms, whatsapp) - default: email
-- `message` (optional): Custom message to include with the ticket
+- `eventId` (required): Ticket Generator Event ID
+- `ticketCategoryId` (optional): Ticket Category ID. Omit if the event has a single category
+- `email` (optional): Email address of the recipient (ticket will be sent here)
+- `phoneNumber` (optional): Recipient's phone number for SMS delivery
+- `whatsApp` (optional): Set `true` to send ticket via WhatsApp (requires `phoneNumber`)
+- `whatsAppConsent` (optional): Whether the recipient has consented to receive WhatsApp messages (required if `whatsApp` is `true`)
+- `subject` (optional): Subject line of the email (if `email` is provided)
+- `body` (optional): Message body (HTML or plain text) for the email/SMS/WhatsApp message
+- `fromName` (optional): The sender name shown to the recipient
+- `variables` (optional): Array of up to 5 variable fields to personalize the ticket, each with:
+  - `value` (required): Value corresponding to the header (e.g., `"A12"`, `"Mark"`)
+  - `header` (optional): Variable header label (e.g., `"Seat"`, `"Name"`). Optional if default is set in design
 
-#### 4. `get_event_details`
-Gets event details and information from the Ticket Generator API.
+#### 4. `get_events_details`
+Returns the details (name, description, start date, end date, location, ticket categories, etc.) of all active events associated with your account.
 
 **Parameters:**
-- `event_id` (required): The unique ID of the event to get details for
-- `include_tickets` (optional): Whether to include ticket information in the response - default: false
-- `include_attendees` (optional): Whether to include attendee information in the response - default: false
+- None — this tool takes no parameters and returns all active events for your API key
 
 ## Integration with MCP Clients
 
@@ -230,12 +236,12 @@ Any MCP-compatible client can connect to this server using HTTP transport. Confi
 
 ## API Endpoints
 
-This MCP server integrates with the following Ticket Generator API endpoints:
+This MCP server integrates with the following Ticket Generator API endpoints (base URL: `https://apis.ticket-generator.com/client/v1`):
 
-1. **`/ticket/data`** - Get ticket data and information
-2. **`/ticket/url`** - Generate ticket URLs for sharing
-3. **`/ticket/send`** - Send tickets via email or other delivery methods
-4. **`/event/details`** - Get event details and information
+1. **`POST /ticket/data`** — Generate a ticket ID and QR code image
+2. **`POST /ticket/url`** — Get a hosted URL for a rendered ticket
+3. **`POST /ticket/send`** — Send a ticket via email, SMS, or WhatsApp
+4. **`GET /event/details`** — Retrieve details for all active events
 
 For detailed information about the Ticket Generator APIs, visit:
 [https://apis.ticket-generator.com/client/api-docs/](https://apis.ticket-generator.com/client/api-docs/)
@@ -257,10 +263,14 @@ ticket-generator-mcp/
 ├── server.js              # Main MCP server implementation
 ├── package.json           # Node.js dependencies and scripts
 ├── ecosystem.config.cjs   # PM2 configuration for production
-├── deploy.sh             # Deployment script
-├── nginx.conf            # Nginx reverse proxy configuration
-├── Dockerfile            # Docker container configuration
-└── README.md             # This file
+├── Dockerfile             # Docker container configuration
+├── deploy.sh              # ECR build/push + ECS deployment script
+├── task-definition.json   # AWS ECS Fargate task definition template
+├── nginx.conf             # Nginx reverse proxy configuration
+├── DEPLOYMENT.md          # AWS Fargate/ECS deployment guide
+├── NGINX-SETUP.md         # Nginx setup options
+├── PM2-GUIDE.md           # PM2 usage guide
+└── README.md              # This file
 ```
 
 ### Adding New Tools
