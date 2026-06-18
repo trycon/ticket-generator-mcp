@@ -18,7 +18,10 @@ module.exports = {
       RATE_WINDOW_MS: 60000,
       RATE_MAX: 60,
       JSON_LIMIT: '200kb',
-      LOG_FORMAT: 'combined'
+      LOG_FORMAT: 'combined',
+      MCP_BASE_URL: 'https://cf50-49-36-189-168.ngrok-free.app',
+      AUTH_SERVER_ISSUER: 'https://apis.ticket-generator.com',
+      OAUTH_REQUIRED_SCOPES: 'all:read all:write'
     },
     error_file: './logs/err.log',
     out_file: './logs/out.log',

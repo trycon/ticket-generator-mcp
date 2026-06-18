@@ -17,6 +17,7 @@ RUN npm ci --only=production && npm cache clean --force
 
 # Copy application files
 COPY server.js ./
+COPY oauth-discovery.routes.js ./
 COPY ecosystem.config.cjs ./
 
 # Create a non-root user
