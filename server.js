@@ -507,6 +507,171 @@ function getToolDefinitions() {
                     required: ['eventId', 'ticketId'],
                 },
             },
+            // ----- V2 client APIs (Milestone 2: validation/check-in, analytics, webhooks) -----
+            {
+                name: 'get_check_in_log',
+                description: "V2: List an event's check-ins (validated tickets) with cursor pagination, newest first. Optionally filter by check-in time range. Returns a page of {ticket_id, name, check_in_time, check_in_count, entry_point} plus next_cursor.",
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        eventId: {
+                            type: 'string',
+                            description: 'The event id whose check-ins to list (required).',
+                        },
+                        date_from: {
+                            type: 'string',
+                            description: 'Only check-ins at/after this ISO 8601 datetime.',
+                        },
+                        date_to: {
+                            type: 'string',
+                            description: 'Only check-ins at/before this ISO 8601 datetime.',
+                        },
+                        cursor: {
+                            type: 'string',
+                            description: 'Opaque pagination cursor returned as next_cursor from a previous call.',
+                        },
+                        limit: {
+                            type: 'integer',
+                            description: 'Max number of check-ins to return (1-100).',
+                            minimum: 1,
+                            maximum: 100,
+                        },
+                    },
+                    required: ['eventId'],
+                },
+            },
+            {
+                name: 'get_ticket_status',
+                description: 'V2: Get the current validation status of a single ticket (valid, used, cancelled or expired) with its check-in count and last check-in time.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        eventId: {
+                            type: 'string',
+                            description: 'The event id (required).',
+                        },
+                        ticketId: {
+                            type: 'string',
+                            description: 'The ticket id to look up (required).',
+                        },
+                    },
+                    required: ['eventId', 'ticketId'],
+                },
+            },
+            {
+                name: 'get_event_analytics',
+                description: 'V2: Get structured analytics for an event: attendance_rate and delivery_rate (decimals), delivery_by_channel (email/sms/whatsapp), hourly check_in_timeline and failed_deliveries_count.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        eventId: {
+                            type: 'string',
+                            description: 'The event id (required).',
+                        },
+                    },
+                    required: ['eventId'],
+                },
+            },
+            {
+                name: 'get_event_report',
+                description: 'V2: Get a full per-attendee report for an event with delivery + check-in data. Returns JSON by default, or a CSV document when format is "csv".',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        eventId: {
+                            type: 'string',
+                            description: 'The event id (required).',
+                        },
+                        format: {
+                            type: 'string',
+                            description: 'Report format. "json" (default) returns structured data; "csv" returns a downloadable CSV document.',
+                            enum: ['json', 'csv'],
+                        },
+                    },
+                    required: ['eventId'],
+                },
+            },
+            {
+                name: 'get_account_analytics',
+                description: 'V2: Get cross-event analytics for your account: total_events, total_tickets, avg_attendance_rate, tickets_by_channel and a per-event attendance_rate list. Optionally filter by event start date range and group_by week/month.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        date_from: {
+                            type: 'string',
+                            description: 'Only include events whose start datetime is on/after this ISO 8601 datetime.',
+                        },
+                        date_to: {
+                            type: 'string',
+                            description: 'Only include events whose start datetime is on/before this ISO 8601 datetime.',
+                        },
+                        group_by: {
+                            type: 'string',
+                            description: 'Optional grouping granularity for the summary.',
+                            enum: ['week', 'month'],
+                        },
+                    },
+                    required: [],
+                },
+            },
+            {
+                name: 'create_webhook',
+                description: 'V2: Register a webhook endpoint to receive signed event notifications. Provide a https URL and one or more event types. A signing secret is returned ONCE in the response (store it to verify the X-TG-Signature HMAC-SHA256 header).',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        url: {
+                            type: 'string',
+                            description: 'The https endpoint that will receive POST notifications (required).',
+                        },
+                        events: {
+                            type: 'array',
+                            description: 'Event types to subscribe to (at least one required).',
+                            minItems: 1,
+                            items: {
+                                type: 'string',
+                                enum: [
+                                    'ticket.created',
+                                    'ticket.sent',
+                                    'ticket.failed',
+                                    'ticket.scanned',
+                                    'ticket.cancelled',
+                                    'event.created',
+                                    'event.capacity_reached',
+                                ],
+                            },
+                        },
+                        secret: {
+                            type: 'string',
+                            description: 'Optional signing secret (8-256 chars). If omitted, one is generated and returned once.',
+                        },
+                    },
+                    required: ['url', 'events'],
+                },
+            },
+            {
+                name: 'list_webhooks',
+                description: 'V2: List your account\'s active webhook registrations (signing secrets are never returned).',
+                inputSchema: {
+                    type: 'object',
+                    properties: {},
+                    required: [],
+                },
+            },
+            {
+                name: 'delete_webhook',
+                description: 'V2: Delete (deactivate) a webhook registration so it stops receiving deliveries.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        webhookId: {
+                            type: 'string',
+                            description: 'The id of the webhook to delete (required).',
+                        },
+                    },
+                    required: ['webhookId'],
+                },
+            },
         ];
 }
 
@@ -813,6 +978,122 @@ async function handleToolCall(name, args, apiKey) {
                 return buildV2ToolResult(result, 'Ticket cancelled successfully!', 'Failed to cancel ticket');
             }
 
+            // ----- V2 client APIs (Milestone 2) -----
+            case 'get_check_in_log': {
+
+                const params = pickDefined({
+                    date_from: args.date_from,
+                    date_to: args.date_to,
+                    cursor: args.cursor,
+                    limit: args.limit,
+                });
+
+                const result = await makeTGV2Request(
+                    `/events/${encodeURIComponent(args.eventId)}/checkins`,
+                    'GET',
+                    null,
+                    apiKey,
+                    { params }
+                );
+
+                return buildV2ToolResult(result, 'Check-in log retrieved successfully!', 'Failed to get check-in log');
+            }
+
+            case 'get_ticket_status': {
+
+                const result = await makeTGV2Request(
+                    `/events/${encodeURIComponent(args.eventId)}/tickets/${encodeURIComponent(args.ticketId)}/status`,
+                    'GET',
+                    null,
+                    apiKey
+                );
+
+                return buildV2ToolResult(result, 'Ticket status retrieved successfully!', 'Failed to get ticket status');
+            }
+
+            case 'get_event_analytics': {
+
+                const result = await makeTGV2Request(
+                    `/events/${encodeURIComponent(args.eventId)}/analytics`,
+                    'GET',
+                    null,
+                    apiKey
+                );
+
+                return buildV2ToolResult(result, 'Event analytics retrieved successfully!', 'Failed to get event analytics');
+            }
+
+            case 'get_event_report': {
+
+                const params = pickDefined({
+                    format: args.format,
+                });
+
+                const result = await makeTGV2Request(
+                    `/events/${encodeURIComponent(args.eventId)}/report`,
+                    'GET',
+                    null,
+                    apiKey,
+                    { params }
+                );
+
+                // a CSV report comes back as a raw string; present it verbatim
+                if (result.success && args.format === 'csv') {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: `Event report (CSV) generated successfully!\n\n${typeof result.data === 'string' ? result.data : JSON.stringify(result.data)}`,
+                            },
+                        ],
+                    };
+                }
+
+                return buildV2ToolResult(result, 'Event report generated successfully!', 'Failed to generate event report');
+            }
+
+            case 'get_account_analytics': {
+
+                const params = pickDefined({
+                    date_from: args.date_from,
+                    date_to: args.date_to,
+                    group_by: args.group_by,
+                });
+
+                const result = await makeTGV2Request('/account/analytics', 'GET', null, apiKey, { params });
+
+                return buildV2ToolResult(result, 'Account analytics retrieved successfully!', 'Failed to get account analytics');
+            }
+
+            case 'create_webhook': {
+
+                const requestData = pickDefined({
+                    url: args.url,
+                    events: args.events,
+                    secret: args.secret,
+                });
+
+                const result = await makeTGV2Request('/webhooks', 'POST', requestData, apiKey, {
+                    headers: { 'Idempotency-Key': randomUUID() },
+                });
+
+                return buildV2ToolResult(result, 'Webhook registered successfully! Store the returned secret; it will not be shown again.', 'Failed to register webhook');
+            }
+
+            case 'list_webhooks': {
+
+                const result = await makeTGV2Request('/webhooks', 'GET', null, apiKey);
+
+                return buildV2ToolResult(result, 'Webhooks retrieved successfully!', 'Failed to list webhooks');
+            }
+
+            case 'delete_webhook': {
+
+                const result = await makeTGV2Request(`/webhooks/${encodeURIComponent(args.webhookId)}`, 'DELETE', null, apiKey);
+
+                return buildV2ToolResult(result, 'Webhook deleted successfully!', 'Failed to delete webhook');
+            }
+
             default:
                 return {
                     content: [
@@ -972,7 +1253,7 @@ async function main() {
         });
 
         const host = process.env.HOST || '0.0.0.0';
-        const port = Number(process.env.PORT) || 3000;
+        const port = Number(process.env.PORT) || 3050;
 
         const httpServer = app.listen(port, host, () => {
             console.error(`Ticket Generator MCP server running on http://${host}:${port}`);

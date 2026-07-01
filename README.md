@@ -178,6 +178,83 @@ Returns the details (name, description, start date, end date, location, ticket c
 **Parameters:**
 - None — this tool takes no parameters and returns all active events for your API key
 
+### V2 Client API Tools
+
+These tools call the V2 client APIs (cursor pagination, structured errors, idempotency and spec response headers).
+
+**Milestone 1 — Events & Attendees management:**
+- `list_events` — Cursor-paginated list of your events; optional `status`, `date_from`, `date_to`, `cursor`, `limit`.
+- `create_event` — Create an event (`name`, `date`, optional `end_date`, `venue`, `description`); idempotent.
+- `get_event` — Full details of one event (`eventId`).
+- `update_event` — Partial update (`eventId` + any of `name`, `date`, `end_date`, `venue`, `description`); idempotent.
+- `cancel_event` — Soft-cancel an event (`eventId`); fails if any ticket was checked in.
+- `get_event_summary` — Capacity / issued / sent / cancelled / checked-in counts and attendance rate (`eventId`).
+- `list_attendees` — Cursor-paginated attendees (`eventId`; optional `search`, `status`, `cursor`, `limit`).
+- `get_attendee` — Single attendee/ticket detail (`eventId`, `ticketId`).
+- `update_attendee` — Correct attendee `name`/`email`/`phone` (`eventId`, `ticketId`); idempotent.
+- `resend_ticket` — Re-send a ticket on `email`/`sms`/`whatsapp` (`eventId`, `ticketId`, `channel`); idempotent.
+- `cancel_ticket` — Cancel a single ticket (`eventId`, `ticketId`); fails if already checked in.
+
+**Milestone 2 — Validation/Check-In, Analytics & Webhooks:**
+
+#### `get_check_in_log`
+List an event's check-ins (validated tickets), newest first, with cursor pagination.
+
+**Parameters:**
+- `eventId` (required): The event id
+- `date_from` (optional): Only check-ins at/after this ISO 8601 datetime
+- `date_to` (optional): Only check-ins at/before this ISO 8601 datetime
+- `cursor` (optional): Pagination cursor from a previous `next_cursor`
+- `limit` (optional): Page size (1–100)
+
+#### `get_ticket_status`
+Current validation status of a single ticket (`valid` | `used` | `cancelled` | `expired`) with check-in count and last check-in time.
+
+**Parameters:**
+- `eventId` (required): The event id
+- `ticketId` (required): The ticket id
+
+#### `get_event_analytics`
+Structured analytics for an event: `attendance_rate`, `delivery_rate` (decimals), `delivery_by_channel`, hourly `check_in_timeline` and `failed_deliveries_count`.
+
+**Parameters:**
+- `eventId` (required): The event id
+
+#### `get_event_report`
+Full per-attendee report (delivery + check-in). JSON by default, or a CSV document.
+
+**Parameters:**
+- `eventId` (required): The event id
+- `format` (optional): `json` (default) or `csv`
+
+#### `get_account_analytics`
+Cross-event analytics for your account: `total_events`, `total_tickets`, `avg_attendance_rate`, `tickets_by_channel` and a per-event attendance list.
+
+**Parameters:**
+- `date_from` (optional): Only events starting on/after this ISO 8601 datetime
+- `date_to` (optional): Only events starting on/before this ISO 8601 datetime
+- `group_by` (optional): `week` or `month`
+
+#### `create_webhook`
+Register a webhook endpoint for signed event notifications. The signing secret is returned **once** — store it to verify the `X-TG-Signature` (HMAC-SHA256) header.
+
+**Parameters:**
+- `url` (required): The https endpoint to receive POSTs
+- `events` (required): One or more of `ticket.created`, `ticket.sent`, `ticket.failed`, `ticket.scanned`, `ticket.cancelled`, `event.created`, `event.capacity_reached`
+- `secret` (optional): Signing secret (8–256 chars); auto-generated if omitted
+
+#### `list_webhooks`
+List your account's active webhook registrations (secrets are never returned).
+
+**Parameters:**
+- None
+
+#### `delete_webhook`
+Delete (deactivate) a webhook registration.
+
+**Parameters:**
+- `webhookId` (required): The webhook id to delete
+
 ## Integration with MCP Clients
 
 ### Claude Desktop
@@ -242,6 +319,8 @@ This MCP server integrates with the following Ticket Generator API endpoints (ba
 2. **`POST /ticket/url`** — Get a hosted URL for a rendered ticket
 3. **`POST /ticket/send`** — Send a ticket via email, SMS, or WhatsApp
 4. **`GET /event/details`** — Retrieve details for all active events
+
+The V2 tools call the V2 client APIs under `https://apis.ticket-generator.com/client/v2` — events/attendees management (Milestone 1), plus check-in/validation reads, analytics/reporting and webhooks (Milestone 2): e.g. `GET /events/{eventId}/checkins`, `GET /events/{eventId}/tickets/{ticketId}/status`, `GET /events/{eventId}/analytics`, `GET /events/{eventId}/report`, `GET /account/analytics`, and `POST|GET|DELETE /webhooks`.
 
 For detailed information about the Ticket Generator APIs, visit:
 [https://apis.ticket-generator.com/client/api-docs/](https://apis.ticket-generator.com/client/api-docs/)
