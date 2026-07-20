@@ -15,13 +15,11 @@ import {
     ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import axios from 'axios';
-import {
-    createMcpOAuthMiddleware,
-    createOAuthDiscoveryRouter,
-    extractBearerToken,
-    isOAuthDiscoveryConfigured,
-    loadOAuthDiscoveryConfig,
-} from './oauth-discovery.routes.js';
+import { loadAuthConfig } from './auth/authConfig.js';
+import { createOAuthDiscoveryRouter } from './auth/discoveryRoutes.js';
+import { getRequiredScopeForTool, hasScope } from './auth/scopes.js';
+import { authenticateMcpInit } from './auth/authenticate.js';
+import { extractBearerToken, looksLikeJwt } from './auth/verifyAuth0Token.js';
 
 
 const TG_API_BASE_URL = 'https://apis.ticket-generator.com/client/v1';
@@ -31,8 +29,10 @@ const TG_API_V2_BASE_URL = TG_API_BASE_URL.replace(/\/v1$/, '/v2');
 // Store API keys by session ID for HTTP transport
 const apiKeysBySession = {};
 
-// Create MCP server instance (for stdio mode or as template)
-function createServer(apiKey = null) {
+// Create MCP server instance (for stdio mode or as template).
+// oauthContext (when Auth0 is enabled) carries the validated identity + scopes
+// captured at session init, used to enforce per-tool scope during dispatch.
+function createServer(apiKey = null, oauthContext = null) {
     const server = new Server(
         {
             name: 'ticket-generator-mcp',
@@ -55,6 +55,25 @@ function createServer(apiKey = null) {
     // Handle tool calls
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { name, arguments: args } = request.params;
+
+        // When Auth0 is enabled, enforce the tool's required scope here (the
+        // Streamable HTTP transport multiplexes all tools over one POST /mcp,
+        // so this is the only place that knows which tool is being invoked).
+        if (oauthContext && oauthContext.oauth) {
+            const requiredScope = getRequiredScopeForTool(name);
+            if (!hasScope(oauthContext.oauth, requiredScope)) {
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({ error: 'insufficient_scope', requiredScope }),
+                        },
+                    ],
+                    isError: true,
+                };
+            }
+        }
+
         return await handleToolCall(name, args, apiKey);
     });
 
@@ -714,14 +733,33 @@ async function handleToolCall(name, args, apiKey) {
                  const result = await makeTGRequest('/ticket/data', 'POST', requestData, apiKey);
 
                  if (result.success) {
+
+
+                      // The QR is returned as a data URI. Emit it as a proper MCP image
+                     // content block instead of inlining the base64 into text: large
+                     // base64 strings in a text field get truncated by the tool-result
+                     // size cap before reaching the model, corrupting the image.
+                     const dataUri = result.data.base64EncodedUrl || '';
+                     const dataUriMatch = /^data:(.+?);base64,(.*)$/s.exec(dataUri);
+                     const mimeType = dataUriMatch ? dataUriMatch[1] : 'image/png';
+                     const base64Data = dataUriMatch ? dataUriMatch[2] : dataUri.replace(/^data:[^,]*,/, '');
+                  
+                  
+                  
                      return {
                          content: [
                              {
-                                 type: 'text',
-                                 text: `Ticket generated successfully!\n\nTicket Category Name: ${result.data.ticketCategoryName}\nTicket ID: ${result.data.ticketId}\nTicket Data (Base64): ${result.data.base64EncodedUrl}`,
-                             },
+                                type: 'text',
+                                text: `Ticket generated successfully!\n\nTicket Category Name: ${result.data.ticketCategoryName}\nTicket ID: ${result.data.ticketId}`
+                            },
+                            {
+                                type: 'image',
+                                data: base64Data,
+                                mimeType: mimeType,
+                            },
                          ],
                      };
+                     
                  } else {
                      return {
                          content: [
@@ -1149,17 +1187,15 @@ async function main() {
         const maxReq = Number(process.env.RATE_MAX || 60);
         app.use(rateLimit({ windowMs, max: maxReq, standardHeaders: true, legacyHeaders: false }));
 
-        // MCP OAuth discovery (RFC 9728) for Claude, Cursor, ChatGPT, Gemini
-        let oauthConfig = null;
-
-        if (isOAuthDiscoveryConfigured()) {
-            oauthConfig = loadOAuthDiscoveryConfig();
-            app.use(createOAuthDiscoveryRouter(oauthConfig));
-            console.error('OAuth discovery endpoints enabled');
-            console.error(`  GET ${oauthConfig.mcpBaseUrl}/.well-known/oauth-protected-resource`);
-            console.error(`  GET ${oauthConfig.mcpBaseUrl}/.well-known/oauth-authorization-server`);
+        // Auth0 OAuth (MCP clients only). When configured, mount discovery endpoints
+        // and protect /mcp; otherwise fall back to legacy API-key-in-Authorization mode.
+        const authConfig = loadAuthConfig();
+        const tgLookupUrl = `${TG_API_BASE_URL}/internal/mcp-user-lookup`;
+        if (authConfig) {
+            app.use(createOAuthDiscoveryRouter(authConfig));
+            console.error('Auth0 OAuth enabled for MCP (issuer:', authConfig.issuer, ')');
         } else {
-            console.error('OAuth discovery disabled (set MCP_BASE_URL and AUTH_SERVER_ISSUER to enable)');
+            console.error('Auth0 OAuth disabled - set MCP_BASE_URL, AUTH0_ISSUER, AUTH0_AUDIENCE to enable');
         }
 
         // Store transports and servers by session ID
@@ -1178,13 +1214,8 @@ async function main() {
         // });
 
         // MCP Streamable HTTP endpoint - handles POST, GET, DELETE
-        if (oauthConfig) {
-            app.all('/mcp', createMcpOAuthMiddleware(oauthConfig));
-        }
-
         app.all('/mcp', async (req, res) => {
             try {
-                console.log(req.headers, "mcp > req.headers");
                 const sessionId = req.headers['mcp-session-id'];
                 const authHeader = req.headers['authorization'];
                 let transport;
@@ -1193,11 +1224,33 @@ async function main() {
                     // Reuse existing transport
                     transport = transports[sessionId];
                 } else if (!sessionId && req.method === 'POST') {
-                    // New initialization — Bearer token (OAuth) or raw API key (legacy)
-                    const apiKey = oauthConfig
-                        ? extractBearerToken(authHeader)
-                        : (authHeader || null);
-                    
+                    // New session. Resolve the downstream TG API key + OAuth context.
+                    let apiKey;
+                    let oauthContext = null;
+
+                    // Only take the Auth0 path when a JWT Bearer token is presented. A raw
+                    // TG API key (with or without a "Bearer " prefix) is treated as legacy,
+                    // so both auth modes work simultaneously even when Auth0 is configured.
+                    const bearer = extractBearerToken(authHeader);
+                    const useAuth0 = Boolean(authConfig) && bearer && looksLikeJwt(bearer);
+
+                    if (useAuth0) {
+                        // Validate the Auth0 token, map email -> TG user, confirm MCP
+                        // access, and use that user's existing TG API key downstream.
+                        const authResult = await authenticateMcpInit(authConfig, tgLookupUrl, req, res);
+                        if (!authResult) {
+                            // authenticateMcpInit already sent the error response.
+                            return;
+                        }
+                        apiKey = authResult.apiKey;
+                        oauthContext = { oauth: authResult.oauth, tgUser: authResult.tgUser };
+                    } else {
+                        // Legacy API-key mode (backward compatible): the TG API key is
+                        // provided via the x-api-key header or directly in Authorization.
+                        apiKey = req.headers['x-api-key'] || bearer || authHeader || null;
+                        console.log("apiKey", apiKey);
+                    }
+
                     transport = new StreamableHTTPServerTransport({
                         sessionIdGenerator: () => randomUUID(),
                         onsessioninitialized: (newSessionId) => {
@@ -1215,8 +1268,8 @@ async function main() {
                         }
                     };
 
-                    // Create a new server instance with the API key for this session
-                    const sessionServer = createServer(apiKey);
+                    // Create a new server instance with the API key + OAuth context for this session
+                    const sessionServer = createServer(apiKey, oauthContext);
                     await sessionServer.connect(transport);
                     
                     // Store server instance
