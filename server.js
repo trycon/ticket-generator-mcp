@@ -733,9 +733,7 @@ async function handleToolCall(name, args, apiKey) {
                  const result = await makeTGRequest('/ticket/data', 'POST', requestData, apiKey);
 
                  if (result.success) {
-
-
-                      // The QR is returned as a data URI. Emit it as a proper MCP image
+                     // The QR is returned as a data URI. Emit it as a proper MCP image
                      // content block instead of inlining the base64 into text: large
                      // base64 strings in a text field get truncated by the tool-result
                      // size cap before reaching the model, corrupting the image.
@@ -743,23 +741,21 @@ async function handleToolCall(name, args, apiKey) {
                      const dataUriMatch = /^data:(.+?);base64,(.*)$/s.exec(dataUri);
                      const mimeType = dataUriMatch ? dataUriMatch[1] : 'image/png';
                      const base64Data = dataUriMatch ? dataUriMatch[2] : dataUri.replace(/^data:[^,]*,/, '');
-                  
-                  
-                  
+
                      return {
                          content: [
                              {
-                                type: 'text',
-                                text: `Ticket generated successfully!\n\nTicket Category Name: ${result.data.ticketCategoryName}\nTicket ID: ${result.data.ticketId}`
-                            },
-                            {
-                                type: 'image',
-                                data: base64Data,
-                                mimeType: mimeType,
-                            },
+                                 type: 'text',
+                                 text: `Ticket generated successfully!\n\nTicket Category Name: ${result.data.ticketCategoryName}\nTicket ID: ${result.data.ticketId}`,
+                             },
+                             {
+                                 type: 'image',
+                                 data: base64Data,
+                                 mimeType,
+                             },
                          ],
                      };
-                     
+
                  } else {
                      return {
                          content: [
