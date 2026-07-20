@@ -153,7 +153,7 @@ function getToolDefinitions() {
     return [
             {
                 name: 'get_ticket_data',
-                description: 'Generates a ticket ID and its QR Code image (base64 PNG) for a given event. Optionally pass a ticket category and image width.',
+                description: 'Generates a ticket for a given event and returns the ticket ID (as text) along with its QR Code as a rendered image (PNG). Optionally pass a ticket category and image width.',
                 inputSchema: {
                     "type": "object",
                     "properties": {
