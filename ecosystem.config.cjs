@@ -11,7 +11,7 @@ module.exports = {
       NODE_ENV: 'production',
       MCP_TRANSPORT: 'http',
       HOST: '0.0.0.0',
-      PORT: 3000,
+      PORT: 3050,
       // Add your environment variables here or via Fargate task definition
       // TG_API_KEY: 'your_api_key_here',
       CORS_ORIGINS: '',
@@ -19,9 +19,11 @@ module.exports = {
       RATE_MAX: 60,
       JSON_LIMIT: '200kb',
       LOG_FORMAT: 'combined',
-      MCP_BASE_URL: 'https://cf50-49-36-189-168.ngrok-free.app',
-      AUTH_SERVER_ISSUER: 'https://apis.ticket-generator.com',
-      OAUTH_REQUIRED_SCOPES: 'all:read all:write'
+      // Auth0 OAuth2 (MCP clients only)
+      MCP_BASE_URL: 'https://60c1-182-77-79-109.ngrok-free.app',
+      AUTH0_ISSUER: 'https://ticket-generator.us.auth0.com/',
+      AUTH0_AUDIENCE: 'https://60c1-182-77-79-109.ngrok-free.app',
+      TG_MCP_INTERNAL_SECRET: 'change_me_shared_secret'
     },
     error_file: './logs/err.log',
     out_file: './logs/out.log',
